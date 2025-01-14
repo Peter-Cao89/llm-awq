@@ -136,6 +136,7 @@ def build_model_and_enc(model_path):
             **{"use_cache": False},
         )
     else:
+        # 读取模型配置文件
         config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
         # Note (Haotian): To avoid OOM after huggingface transformers 4.36.2
         config.use_cache = False
@@ -144,6 +145,7 @@ def build_model_and_enc(model_path):
                 config.tokenizer_name, trust_remote_code=True
             )
         else:
+            # 读取tokenizer
             enc = AutoTokenizer.from_pretrained(
                 model_path, use_fast=False, trust_remote_code=True
             )
@@ -188,6 +190,7 @@ def build_model_and_enc(model_path):
         args.run_awq &= not args.load_awq  # if load_awq, no need to run awq
         # Init model on CPU:
         kwargs = {"torch_dtype": torch.float16, "low_cpu_mem_usage": True}
+        # 如果不是量化vila模型，则加载模型
         if not vila_10_quant_mode:
             model = AutoModelForCausalLM.from_pretrained(
                 model_path, config=config, trust_remote_code=True, **kwargs
@@ -199,8 +202,8 @@ def build_model_and_enc(model_path):
             assert args.dump_awq, "Please save the awq results with --dump_awq"
 
             awq_results = run_awq(
-                model,
-                enc,
+                model, #模型
+                enc,#tokenizer
                 w_bit=args.w_bit,
                 q_config=q_config,
                 n_samples=128,

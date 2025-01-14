@@ -23,6 +23,26 @@ def get_named_linears(module):
 
 
 def get_blocks(model):
+    # 对于Qwen2.5来说，model.model.layers的结果如下:
+    # ModuleList(
+    #    (0-23): 24 x Qwen2DecoderLayer(
+    #       (self_attn): Qwen2SdpaAttention(
+    #         (q_proj): Linear(in_features=896, out_features=896, bias=True)
+    #         (k_proj): Linear(in_features=896, out_features=128, bias=True)
+    #         (v_proj): Linear(in_features=896, out_features=128, bias=True)
+    #         (o_proj): Linear(in_features=896, out_features=896, bias=False)
+    #         (rotary_emb): Qwen2RotaryEmbedding()
+    #       )
+    #       (mlp): Qwen2MLP(
+    #         (gate_proj): Linear(in_features=896, out_features=4864, bias=False)
+    #         (up_proj): Linear(in_features=896, out_features=4864, bias=False)
+    #         (down_proj): Linear(in_features=4864, out_features=896, bias=False)
+    #         (act_fn): SiLU()
+    #       )
+    #       (input_layernorm): Qwen2RMSNorm((896,), eps=1e-06)
+    #       (post_attention_layernorm): Qwen2RMSNorm((896,), eps=1e-06)
+    #    )
+    # )
     if model.__class__.__name__ in ("LlamaForCausalLM", "Qwen2ForCausalLM"):
         layers = model.model.layers
     elif model.__class__.__name__ == "LlavaLlamaForCausalLM":
@@ -49,6 +69,7 @@ def get_blocks(model):
 
 def move_embed(model, device):
     if isinstance(model, (LlamaForCausalLM, Qwen2ForCausalLM)):
+        # 将embed_token层与rope层转移到device
         model.model.embed_tokens = model.model.embed_tokens.to(device)
         model.model.rotary_emb = model.model.rotary_emb.to(device)
     elif isinstance(model, LlavaLlamaForCausalLM):
@@ -102,17 +123,18 @@ def run_awq(
     if "bigcode" in str(model.__class__).lower():
         # otherwise attention_mask will always be on cpu.
         model.transformer.bias = model.transformer.bias.to("cuda")
-
+    # 主要用于获取模型的所有层，为一个ModuleList
     layers = get_blocks(model)
-
+    # 获取校准数据集，返回值是一个List，list中每个元素的block大小为seq_len=512
     samples = get_calib_dataset(
         data=calib_data, tokenizer=enc, n_samples=n_samples, block_size=seqlen
     )
+    # 按照第0个维度进行拼接
     samples = torch.cat(samples, dim=0)
 
     inps = []
     layer_kwargs = {}
-
+    # 将第一层、embed_token以及rope层转移到cuda设备上
     layers[0] = layers[0].cuda()
     move_embed(model, "cuda")
 
@@ -153,10 +175,12 @@ def run_awq(
         "clip": [],
     }
 
-    # solve layer by layer
+    # solve layer by layer逐层计算
     for i in tqdm.tqdm(range(len(layers)), desc="Running AWQ..."):
         layer = layers[i]
+        # 将i层layer转移至device上
         layer = layer.cuda()
+        # 获取线性层的{name：module}的字典
         named_linears = get_named_linears(layer)
 
         # firstly, get input features of all linear layers
