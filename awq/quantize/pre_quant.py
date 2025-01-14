@@ -136,6 +136,7 @@ def run_awq(
     layer_kwargs = {}
     # 将第一层、embed_token以及rope层转移到cuda设备上
     layers[0] = layers[0].cuda()
+    # 将embed_token层移到cuda上
     move_embed(model, "cuda")
 
     # get input and kwargs to layer 0
