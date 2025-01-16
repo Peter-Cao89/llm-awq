@@ -184,7 +184,7 @@ def run_awq(
         # 获取线性层的{name：module}的字典
         named_linears = get_named_linears(layer)
 
-        # firstly, get input features of all linear layers
+        # firstly, get input features of all linear layers。这是一个钩子函数
         def cache_input_hook(m, x, y, name, feat_dict):
             x = x[0]
             x = x.detach().cpu()
@@ -213,11 +213,11 @@ def run_awq(
             auto_scale
         ):  # if it applies, we should also modify the input_feat with scales
             scales_list = auto_scale_block(
-                layer,
-                layer_kwargs,
-                w_bit=w_bit,
-                q_config=q_config,
-                input_feat=input_feat,
+                layer,  # 第i层
+                layer_kwargs,  # 层参数
+                w_bit=w_bit,  # 位数
+                q_config=q_config,  # 量化配置
+                input_feat=input_feat,  # 来自校准集的input features
             )
             # apply_scale(layer, scales_list, input_feat_dict=input_feat)
             apply_scale(layers[i], scales_list, input_feat_dict=input_feat)

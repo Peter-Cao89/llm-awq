@@ -26,7 +26,8 @@ def get_weight_scale(weight, q_group_size=-1):
 
 
 @torch.no_grad()
-def get_act_scale(x):
+def get_act_scale(x: torch.Tensor):
+    # 首选对x求绝对值,然后以dim=-1进行reshape,然后对dim=0求均值
     return x.abs().view(-1, x.shape[-1]).mean(0)
 
 
@@ -106,7 +107,7 @@ def auto_scale_block(module, module_kwargs, w_bit, q_config, input_feat):
         module_kwargs.pop("use_cache")
 
     # find the best scale ratio
-    def _search_module_scale(block, linears2scale: list, x, kwargs={}):
+    def _search_module_scale(block: nn.Module, linears2scale: list, x, kwargs={}):
         # w: co, ci
         # x: n, ci
         x = x.to(next(block.parameters()).device)
@@ -115,20 +116,23 @@ def auto_scale_block(module, module_kwargs, w_bit, q_config, input_feat):
             if isinstance(org_out, tuple):
                 org_out = org_out[0]
 
-        x_max = get_act_scale(x)
+        # 论文中的s_x，激活的平均幅值
+        x_max = get_act_scale(x) # 以dim=-1为轴求x绝对值后的均值
 
         best_error = float("inf")
         best_ratio = -1
         best_scales = None
 
-        n_grid = 20
+        n_grid = 20  # grid空间
         history = []
 
+        # 获取block中kv的state dict
         org_sd = {k: v.cpu() for k, v in block.state_dict().items()}
+        # 遍历alpha值
         for ratio in range(n_grid):
-            ratio = ratio * 1 / n_grid
+            ratio = ratio * 1 / n_grid  # ratio的取值范围为0-1，一共20个值
             scales = x_max.pow(ratio).clamp(min=1e-4).view(-1)
-            scales = scales / (scales.max() * scales.min()).sqrt()
+            scales = scales / (scales.max() * scales.min()).sqrt() 
             for fc in linears2scale:
                 fc.weight.mul_(scales.view(1, -1).to(fc.weight.device))
                 fc.weight.data = w_quantize_func(fc.weight.data) / (scales.view(1, -1))
@@ -155,7 +159,9 @@ def auto_scale_block(module, module_kwargs, w_bit, q_config, input_feat):
         assert torch.isnan(best_scales).sum() == 0, best_scales
         return best_scales.detach()
 
-    def _auto_get_scale(prev_op, layers, inp, module2inspect=None, kwargs={}):
+    def _auto_get_scale(prev_op: nn.Module, layers: list, inp, module2inspect=None, kwargs={}):
+        """主要是调用_search_module_scale进行grid search寻找最合适的scale。返回一个元组
+        """
         # module2inspect: if given, we will check the output diff of this module instead of layers
         if module2inspect is None:
             assert len(layers) == 1
@@ -213,6 +219,8 @@ def auto_scale_block(module, module_kwargs, w_bit, q_config, input_feat):
         )
 
     elif isinstance(module, (LlamaDecoderLayer, Qwen2DecoderLayer)):
+        # 对于Llama3与qwen2+模型，根据权重与激活值的关系拆分成4个子步骤来依次处理，
+        # 分别是[q_proj,k_proj,v_proj]，[o_proj]，[gate_proj,up_proj]，[down_proj]。
         # attention input
         scales_list.append(
             _auto_get_scale(
