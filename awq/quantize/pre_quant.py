@@ -194,6 +194,7 @@ def run_awq(
         handles = []
         for name in named_linears:
             handles.append(
+                # register_forward_hook在前向传播过程中注册一个回调函数，用于捕获module的输入输出或中间层的特征
                 named_linears[name].register_forward_hook(
                     functools.partial(cache_input_hook, name=name, feat_dict=input_feat)
                 )
